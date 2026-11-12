@@ -1,0 +1,71 @@
+Package: bspam
+Type: Package
+Encoding: UTF-8
+Title: Speed-Accuracy Psychometric Modeling for Binomial Count Outcome
+        Data
+Version: 1.2.6
+Authors@R: c(
+             person(given = "Kuo", family = "Wang", 
+                    role = c("aut", "cre"), 
+                    email = "wangkuo@nifty.com", 
+                    comment = c(ORCID = "0000-0002-4925-0591")),
+             person(given = "Akihito", family = "Kamata", 
+                    role = c("aut", "ctb"), 
+                    email = "akamata@smu.edu", 
+                    comment = c(ORCID = "0000-0001-9570-1464")),
+             person(given = "Cornelis J.", family = "Potgieter", 
+                    role = "aut", 
+                    email = "c.potgieter@tcu.edu", 
+                    comment = c(ORCID = "0000-0002-1995-6817")),
+             person(given = "Joseph F. T.", family = "Nese", 
+                    role = "aut", 
+                    email = "jnese@uoregon.edu", 
+                    comment = c(ORCID = "0000-0002-9878-7395")),
+             person(given = "Yusuf", family = "Kara", 
+                    role = "aut", 
+                    email = "ykara@mail.smu.edu",  
+                    comment = c(ORCID = "0000-0003-0691-0630")),
+             person(given = "Sarunya", family = "Somsong", 
+                    role = "aut", 
+                    email = "sarunya.ss@hotmail.com", 
+                    comment = c(ORCID = "0000-0002-4974-7346")),
+             person(given = "Xin", family = "Qiao", 
+                    role = "aut", email = "xqiao@usf.edu", 
+                    comment = c(ORCID = "0000-0002-3248-7859"))
+            )
+Maintainer: Kuo Wang <wangkuo@nifty.com>
+Description: Provides functions to fit speed-accuracy psychometric models
+    for binomial count outcome data. The models jointly represent accuracy
+    and response time and can be used for model-based calibration and scoring
+    of oral reading fluency (ORF) assessment data. The methods are based on
+    Potgieter, Kamata and Kara (2017) <doi:10.48550/arXiv.1705.10446>
+    and Kara, Kamata, Potgieter and Nese (2020)
+    <doi:10.1177/0013164419900208>. 
+License: GPL (>= 3)
+Depends: R (>= 3.5.0)
+Imports: tibble, rootSolve, tidyverse, tidyr, magrittr, doParallel,
+        foreach, stringr, futile.logger, mvtnorm, nleqslv, tryCatchLog,
+        parallel, miscTools, psych, dplyr, plotly, Matrix, statmod
+Suggests: knitr, rstan, BH, RcppEigen, runjags, rjags, rmarkdown,
+        testthat (>= 3.0.0)
+URL: https://kamataak.github.io/bspam/,
+        https://github.com/kamataak/bspam
+BugReports: https://github.com/kamataak/bspam/issues
+RoxygenNote: 7.3.3
+LazyData: yes
+Config/testthat/edition: 3
+NeedsCompilation: no
+VignetteBuilder: knitr
+Packaged: 2026-10-27 21:40:48 UTC; 48391321
+Author: Kuo Wang [aut, cre] (ORCID: <https://orcid.org/0000-0002-4925-0591>),
+  Akihito Kamata [aut, ctb] (ORCID:
+    <https://orcid.org/0000-0001-9570-1464>),
+  Cornelis J. Potgieter [aut] (ORCID:
+    <https://orcid.org/0000-0002-1995-6817>),
+  Joseph F. T. Nese [aut] (ORCID:
+    <https://orcid.org/0000-0002-9878-7395>),
+  Yusuf Kara [aut] (ORCID: <https://orcid.org/0000-0003-0691-0630>),
+  Sarunya Somsong [aut] (ORCID: <https://orcid.org/0000-0002-4974-7346>),
+  Xin Qiao [aut] (ORCID: <https://orcid.org/0000-0002-3248-7859>)
+Repository: CRAN
+Date/Publication: 2026-11-12 15:40:02 UTC

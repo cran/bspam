@@ -1,0 +1,922 @@
+#' Fit the speed-accuracy psychometric model
+#'
+#' This is the main interface function for estimating parameters of the
+#' speed-accuracy psychometric model for repeatedly measured count outcome
+#' data. The model jointly describes task accuracy and completion time.
+#' Model parameters can be estimated using the Monte Carlo EM (MCEM)
+#' algorithm described in Potgieter et al. (2017) or a fully Bayesian
+#' approach described in Kara et al. (2020).
+#'
+#' In the oral reading fluency (ORF) assessment context, tasks correspond
+#' to reading passages, accuracy is represented by the number of words read
+#' correctly, and speed is represented by reading time.
+#'
+#' @param data A data frame containing the response data or an object created
+#'     by \code{\link{prep}}. When a prepared-data object is supplied, the
+#'     column-name arguments \code{person.id}, \code{task.id},
+#'     \code{max.counts}, \code{obs.counts}, and \code{time} should be left
+#'     unspecified.
+#' @param person.id Quoted variable name in \code{data} identifying persons.
+#' @param task.id Quoted variable name in \code{data} identifying tasks.
+#'     In the ORF assessment context, this is the passage identifier.
+#' @param sub.task.id Quoted variable name in \code{data} identifying
+#'     sub-tasks. In the ORF assessment context, this is the sentence
+#'     identifier. This argument is required when \code{testlet = TRUE}.
+#' @param max.counts Quoted variable name in \code{data} giving the maximum
+#'     possible count for each task. In the ORF assessment context, this is
+#'     the number of words in the passage or sentence.
+#' @param obs.counts Quoted variable name in \code{data} giving the observed
+#'     number of successful outcomes for each task. In the ORF assessment
+#'     context, this is the number of words read correctly.
+#' @param time Quoted variable name in \code{data} giving the completion time,
+#'     in seconds, for each task.
+#' @param k.in Numeric value or vector indicating the number of Monte Carlo
+#'     imputations used in the MCEM algorithm. Default is \code{5}.
+#' @param reps.in Numeric value or vector indicating the number of Monte Carlo
+#'     EM iterations. Default is \code{50}.
+#' @param ests.in An optional list containing initial values for the model
+#'     parameters. If initial values are not supplied, they are generated
+#'     internally using the method-of-moments procedure.
+#' @param est Character string specifying the estimation method. Available
+#'     options are \code{"mcem"} and \code{"bayes"}. Default is
+#'     \code{"mcem"}.
+#' @param se Character string specifying the method used to obtain standard
+#'     errors for MCEM parameter estimates. Available options are
+#'     \code{"none"}, \code{"analytic"}, and \code{"bootstrap"}.
+#'     Default is \code{"none"}.
+#' @param verbose Logical. If \code{TRUE}, a summary of the fitted model is
+#'     printed. Default is \code{FALSE}.
+#' @param testlet Logical. If \code{TRUE}, a sub-task-level testlet model is
+#'     fitted using \code{\link{fit.model.testlet}}. In the ORF assessment
+#'     context, this models sentences nested within passages. Default is
+#'     \code{FALSE}.
+#'
+#' @details
+#' For task-level analyses (\code{testlet = FALSE}), \code{fit.model()}
+#' estimates task parameters for the accuracy and time components together
+#' with population-level parameters describing the latent speed-accuracy
+#' distribution.
+#'
+#' The function accepts either raw long-format data or data previously
+#' prepared with \code{\link{prep}}. When raw data are supplied, the relevant
+#' columns are identified through the column-name arguments. When a
+#' \code{prep} object is supplied, the standardized data stored in that object
+#' are used directly.
+#'
+#' With \code{est = "mcem"}, model parameters are estimated by Monte Carlo EM.
+#' Standard errors may optionally be obtained using the method specified by
+#' \code{se}. With \code{est = "bayes"}, model parameters are estimated using
+#' the Bayesian implementation.
+#'
+#' When \code{testlet = TRUE}, the function fits the sentence-level testlet
+#' model through \code{\link{fit.model.testlet}} rather than the task-level
+#' model.
+#'
+#' @return Invisibly returns a fitted model object. For task-level analyses,
+#'     the returned object has class \code{"fit.model"} and contains
+#'     \code{task.param}, with estimated task parameters, and
+#'     \code{hyper.param}, with estimated population-level parameters.
+#'     Standard-error columns are included when applicable. When
+#'     \code{testlet = TRUE}, an object of class \code{"fit.model.testlet"}
+#'     is returned containing the estimated sub-task and testlet-model
+#'     parameters.
+#'
+#' @seealso
+#' \code{\link{prep}} for preparing response data,
+#' \code{\link{scoring}} for estimating person scores, and
+#' \code{\link{fit.model.testlet}} for fitting the sub-task-level testlet model.
+#'
+#' @references
+#' Potgieter, C. J., Kamata, A., & Kara, Y. (2017).
+#' An EM algorithm for estimating an oral reading speed and accuracy model.
+#' \emph{arXiv preprint arXiv:1705.10446}.
+#' \url{https://arxiv.org/abs/1705.10446}
+#'
+#' Kara, Y., Kamata, A., Potgieter, C. J., & Nese, J. F. T. (2020).
+#' Estimating model-based oral reading fluency: A Bayesian approach with
+#' a binomial-lognormal joint latent model.
+#' \emph{Educational and Psychological Measurement, 80}(5), 847-869.
+#' \doi{10.1177/0013164419900208}
+#'
+#' @examples
+#' \donttest{
+#' MCEM_run <- fit.model(
+#'   data = passage2,
+#'   person.id = "id.student",
+#'   task.id = "id.passage",
+#'   max.counts = "numwords.pass",
+#'   obs.counts = "wrc",
+#'   time = "sec",
+#'   k.in = 5,
+#'   reps.in = 50,
+#'   est = "mcem"
+#' )
+#' }
+#'
+#' @export
+fit.model <- function(data=NA, person.id="",task.id="",sub.task.id="",max.counts="",obs.counts="",time="", k.in=5,reps.in=50,ests.in=NA,
+                      est="mcem",se="none",verbose=FALSE, testlet=FALSE) {
+  # loading logger
+  log.initiating()
+
+  if (person.id != "") {
+    if (testlet) { # for sub task level 
+
+      # call fit.model.testlet
+      output <- fit.model.testlet(data,person.id,sub.task.id,obs.counts,time,task.id,max.counts)
+      if (verbose == TRUE) {
+        summary.fit.model.testlet(output)
+      }
+      return(invisible(output))
+    } else { # task level 
+      #create wide data
+      if (est != "bayes") {
+        data <- prepwide(data,person.id,task.id,max.counts,obs.counts,time)       
+      }
+    }
+  } else { # prepared data
+    if (testlet) { # for sub task level 
+      output <- fit.model.testlet(data$data.long,person.id="person.id",sub.task.id="sub.task.id",obs.counts="obs.counts",time="time",task.id="task.id",max.counts="max.counts")
+      if (verbose == TRUE) {
+        summary.fit.model.testlet(output)
+      }
+      return(invisible(output))
+    } else {
+      data <- data$data.wide      
+    }
+  }
+  
+
+  if (est == "mcem") {
+    flog.info("Begin mcem process", name = "orfrlog")
+    
+    if (se == "none") {
+
+      MCEMests <- run.mcem(data$Y,data$logT10,data$N,data$I,k.in,reps.in,ests.in,verbose=verbose)
+
+      task.param <-  tibble(
+        a = MCEMests$a,
+        b = MCEMests$b,
+        alpha = MCEMests$alpha,
+        beta = MCEMests$beta,
+        task.id = as.numeric(colnames(data$Y)),
+        max.counts = data$N)
+      hyper.param <- tibble(vartau = MCEMests$vartau,
+                            rho = MCEMests$rho)
+      MCEM.ests <- list(task.param = task.param,
+                        hyper.param = hyper.param)
+    } else {
+      # test
+      # if (is.na(ests.in)) {
+      #   ests.in <- mom(data$Y, data$logT10, data$N, data$I)
+      # }
+
+      MCEMests <- run.mcem(data$Y, data$logT10, data$N, data$I,
+                           k.in=k.in, reps.in=reps.in,ests.in=ests.in)
+
+      MCEMout <- c(MCEMests$a, MCEMests$b, MCEMests$alpha,
+                   MCEMests$beta, MCEMests$vartau, MCEMests$rho)
+      if (se == "analytic") {
+        CV.analytic <- numerical.cov(data$Y, data$logT10, data$N, data$I,
+                                     MCEMout,h.val=1e-10, M=100)
+      } else { # bootstrap
+        # CV.analytic <- boot.cov(data$Y, data$logT10, data$N, data$I,
+        #                         k.in=8, reps.in=3, B=10)
+        # an alternative function
+        CV.analytic <- bootmodel.cov(data$Y, data$logT10, data$N, data$I,
+                                     MCEMout,k.in=k.in, reps.in=reps.in,B=10)
+
+      }
+      SE.analytic <- sqrt(diag(CV.analytic))
+
+      task.param <-  tibble(
+        a = MCEMests$a,
+        b = MCEMests$b,
+        alpha = MCEMests$alpha,
+        beta = MCEMests$beta,
+        se.a = SE.analytic[1:length(MCEMests$a)],
+        se.b = SE.analytic[(length(MCEMests$a)+1):(length(MCEMests$a)+length(MCEMests$b))],
+        se.alpha = SE.analytic[(length(MCEMests$a)+length(MCEMests$b)+1):(length(MCEMests$a)+length(MCEMests$b)+length(MCEMests$alpha))],
+        se.beta = SE.analytic[(length(MCEMests$a)+length(MCEMests$b)+length(MCEMests$alpha)+1):(length(MCEMests$a)+length(MCEMests$b)+length(MCEMests$alpha)+length(MCEMests$beta))],
+        task.id = as.numeric(colnames(data$Y)),
+        max.counts = data$N)
+      hyper.param <- tibble(vartau = MCEMests$vartau,
+                            rho = MCEMests$rho,
+                            se.vartau = SE.analytic[(length(MCEMests$a)+length(MCEMests$b)+length(MCEMests$alpha)+length(MCEMests$beta)+1)],
+                            se.rho = SE.analytic[(length(MCEMests$a)+length(MCEMests$b)+length(MCEMests$alpha)+length(MCEMests$beta)+2)])
+      MCEM.ests <- list(task.param = task.param,
+                        hyper.param = hyper.param)
+    }
+
+
+    # check if shows the summary
+    if (verbose == TRUE) {
+      summary.fit.model(MCEM.ests)
+    }
+    class(MCEM.ests) <- "fit.model" # define class
+    flog.info("End mcem process", name = "orfrlog")
+    return(invisible(MCEM.ests))
+
+
+  } else { # for bayes, mcem parameters are necessary
+    flog.info("Begin bayes process", name = "orfrlog")
+    bayes.ests <- bayes(data,
+                       person.id,
+                       task.id,
+                       max.counts,
+                       obs.counts,
+                       time,
+                       parallel=TRUE, #logical, run in parallel? "TRUE" or "FALSE"
+                       n.chains=NA, # pos. int., number of the chains
+                       thin=1, #pos. int, thinning interval, a.k.a, period of saving samples
+                       iter=NA,  # pos. int., number of the iterations after the burn-in period
+                       burn=NA  # pos. int., number of the burn-in iterations)
+    )
+    # check if shows the summary
+    if (verbose == TRUE) {
+      summary.fit.model(bayes.ests)
+    }
+
+    class(bayes.ests) <- "fit.model" # define class
+    flog.info("End bayes process", name = "orfrlog")
+    return(invisible(bayes.ests))
+  }
+}
+
+#' Estimate person scores from a calibrated speed-accuracy model
+#'
+#' This is the main interface function for estimating person-level scores
+#' from a calibrated speed-accuracy psychometric model. It estimates latent
+#' accuracy and speed scores using likelihood-based methods, including
+#' maximum likelihood estimation (MLE), maximum a posteriori estimation
+#' (MAP), and expected a posteriori estimation (EAP), or a fully Bayesian
+#' approach.
+#'
+#' In oral reading fluency (ORF) applications, the function can additionally
+#' produce model-based words-correct-per-minute (WCPM) scores. Scoring can be
+#' performed at the task level or, when a testlet model is used, at the
+#' sub-task level while accounting for the nesting of sentences within
+#' passages. Censored observations can also be accommodated.
+#'
+#' @param calib.data A fitted calibration object obtained from
+#'     \code{\link{fit.model}}. This should be an object of class
+#'     \code{"fit.model"} or \code{"fit.model.testlet"}, depending on the
+#'     scoring model being used.
+#' @param data A data frame containing response data or an object created by
+#'     \code{\link{prep}}. When raw data are supplied, the relevant columns
+#'     are identified using the column-name arguments below.
+#' @param person.id Quoted variable name in \code{data} identifying persons.
+#' @param task.id Quoted variable name in \code{data} identifying tasks.
+#'     In the ORF assessment context, this is the passage identifier.
+#' @param sub.task.id Quoted variable name in \code{data} identifying
+#'     sub-tasks. In the ORF assessment context, this is the sentence
+#'     identifier. This argument is required when \code{testlet = TRUE}.
+#' @param occasion Quoted variable name in \code{data} identifying measurement
+#'     occasions. If not supplied, a single occasion is assumed.
+#' @param group Quoted variable name in \code{data} identifying groups.
+#'     If not supplied, a single group is assumed.
+#' @param max.counts Quoted variable name in \code{data} giving the maximum
+#'     possible count for each task or sub-task. In the ORF assessment
+#'     context, this is the number of words in the passage or sentence.
+#' @param obs.counts Quoted variable name in \code{data} giving the observed
+#'     number of successful outcomes. In the ORF assessment context, this is
+#'     the number of words read correctly.
+#' @param time Quoted variable name in \code{data} giving the observed
+#'     completion time, in seconds.
+#' @param cens Quoted variable name in \code{data} containing censoring
+#'     indicators, where \code{1} indicates a censored observation and
+#'     \code{0} indicates a fully observed response. This argument is used
+#'     when \code{censoring = TRUE} or \code{testlet = TRUE}.
+#' @param cases Optional set of person-by-occasion cases for which scores are
+#'     requested. If \code{NULL}, scores are estimated for all available
+#'     cases in \code{data}.
+#' @param est Character string specifying the scoring estimator. Available
+#'     options are \code{"mle"}, \code{"map"}, \code{"eap"}, and
+#'     \code{"bayes"}. Default is \code{"map"}.
+#' @param se Character string specifying the standard-error method for
+#'     non-censored scoring. Available options are \code{"analytic"} and
+#'     \code{"bootstrap"}. Default is \code{"analytic"}.
+#' @param failsafe Numeric value specifying the number of additional attempts
+#'     allowed when a bootstrap calculation fails for a case. Values from
+#'     \code{0} to \code{50} may be used. Default is \code{0}.
+#' @param bootstrap Numeric value specifying the number of bootstrap
+#'     replications when \code{se = "bootstrap"}. Default is \code{100}.
+#' @param external An optional vector of task identifiers used to define the
+#'     tasks for model-based score calculation. If \code{NULL}, model-based
+#'     outcomes are calculated using the tasks assigned to or observed for
+#'     each person. If supplied, the specified calibrated tasks are used
+#'     instead.
+#' @param type Character string specifying the output type. If
+#'     \code{"general"}, latent accuracy and speed scores and related
+#'     model-based outcomes are returned without WCPM. If \code{"orf"},
+#'     model-based WCPM is additionally returned. Default is
+#'     \code{"general"}.
+#' @param censoring Logical. If \code{TRUE}, scoring accommodates censored
+#'     task- or sub-task-level observations using the corresponding
+#'     censoring model. Default is \code{FALSE}.
+#' @param testlet Logical. If \code{TRUE}, sub-task-level scoring is performed
+#'     using the testlet model. In the ORF assessment context, this corresponds
+#'     to sentence-level observations nested within passages. Setting
+#'     \code{testlet = TRUE} also activates the censoring-scoring pathway.
+#'     Default is \code{FALSE}.
+#'
+#' @details
+#' The calibration parameters supplied through \code{calib.data} are treated
+#' as fixed when estimating person-level latent accuracy and speed scores.
+#' For standard task-level scoring without censoring, \code{est} selects
+#' among MLE, MAP, EAP, and fully Bayesian scoring.
+#'
+#' When \code{se = "analytic"}, standard errors are obtained as part of the
+#' standard scoring procedure. When \code{se = "bootstrap"}, case-level
+#' parametric bootstrap calculations are performed, with the number of
+#' replications controlled by \code{bootstrap}. The \code{failsafe} argument
+#' controls how many additional attempts are made for a case when a bootstrap
+#' calculation fails.
+#'
+#' The \code{external} argument can be used to calculate model-based outcomes
+#' on a specified set of calibrated tasks rather than on the tasks observed
+#' for each person. This can be useful when scores are to be expressed on a
+#' common task set.
+#'
+#' When \code{censoring = TRUE}, censored and fully observed responses are
+#' distinguished using the variable supplied through \code{cens}. When
+#' \code{testlet = TRUE}, scoring is performed at the sub-task level using
+#' the testlet model and the censoring-scoring pathway is activated
+#' automatically.
+#'
+#' @return The returned object depends on the scoring procedure.
+#'     For standard analytic or Bayesian scoring without censoring, an object
+#'     of class \code{"scoring"} is returned containing person identifiers,
+#'     descriptive response information, estimated latent accuracy and speed
+#'     scores, their standard errors, and model-based outcomes appropriate to
+#'     the selected \code{type}.
+#'
+#'     With \code{se = "bootstrap"}, an object of class \code{"bootstrap"}
+#'     is returned. It contains \code{bootstrap.out}, with successfully
+#'     estimated bootstrap results, and \code{error_case}, identifying cases
+#'     for which bootstrap estimation was unsuccessful.
+#'
+#'     With censoring or testlet scoring, an object of class
+#'     \code{"scoring.censoring"} is returned containing the corresponding
+#'     Bayesian score estimates, posterior standard deviations, and
+#'     model-based outcomes.
+#'
+#' @seealso
+#' \code{\link{fit.model}} for model calibration,
+#' \code{\link{prep}} for preparing response data, and
+#' \code{\link{summary.scoring}} for summarizing scoring results.
+#'
+#' @references
+#' 
+#' Kara, Y., Kamata, A., Potgieter, C. J., & Nese, J. F. T. (2020).
+#' Estimating model-based oral reading fluency: A Bayesian approach.
+#' \emph{Educational and Psychological Measurement, 80}(5), 847-869.
+#' \doi{10.1177/0013164419900208}
+#' 
+#' Potgieter, C. J., Qiao, X., Kamata, A., & Kara, Y. (2024).
+#' Likelihood-based estimation of model-derived oral reading fluency.
+#' \emph{Journal of Educational Measurement, 61}(3), 542-559.
+#' \doi{10.1111/jedm.12404}
+#'
+#' Qiao, X., Evudottir, E., Potgieter, C. J., & Kamata, A. (2026).
+#' Likelihood-based estimation of model-derived oral reading fluency under
+#' overdispersed count-time data.
+#' \emph{Measurement: Interdisciplinary Research and Perspectives}.
+#' \doi{10.1080/15366367.2026.2643183}
+#'
+#' 
+#' @examples
+#' WCPM_all <- scoring(
+#'   calib.data = passage.calib.mcem,
+#'   data = passage2,
+#'   person.id = "id.student",
+#'   occasion = "occasion",
+#'   group = "grade",
+#'   task.id = "id.passage",
+#'   max.counts = "numwords.pass",
+#'   obs.counts = "wrc",
+#'   time = "sec",
+#'   est = "map",
+#'   se = "analytic",
+#'   type = "general"
+#' )
+#'
+#' @export
+scoring <- function(calib.data=NA, data=NA, person.id="", task.id="", sub.task.id="", occasion="", group="", max.counts="", obs.counts="", time="", cens="", cases=NULL,
+                    est="map", se="analytic",failsafe=0, bootstrap=100, external=NULL, type="general", censoring=FALSE, testlet=FALSE) {
+  # loading logger
+  log.initiating()
+  
+  # Check MCEM object
+  if (!class(calib.data)[1] %in% c("fit.model", "fit.model.testlet")) {
+    flog.info("Missed fit.model object, end scoring process", name = "orfrlog")
+    return(NULL)
+  }
+  
+  bootstrap.out <- tibble()
+  error_case <- tibble()
+  prep_data <- NULL
+  
+  if (testlet == TRUE) {
+    censoring <- TRUE
+  }
+  
+  # with censoring
+  if (censoring) {
+    
+    #Check if scoring will be done for specific cases of data. 
+    # if(is.character(cases)){
+    if (length(cases) == 0) {
+      flog.info("No cases!", name = "orfrlog")  
+      data <- data
+    }else{ # with cases 
+      if (is.list(data) && !is.data.frame(data)) { # preped data
+        longdata <- data$data.long
+        colnames(cases) <- "cases"
+        id_col <- which(colnames(longdata)== ifelse(person.id != "", person.id, "person.id"))
+        occ_col <- which(colnames(longdata)==ifelse(occasion != "", occasion, "occasion"))
+        id_new <- paste(unlist(longdata[,id_col]), unlist(longdata[,occ_col]), sep = "_")
+        id_sel <- id_new %in% cases$cases
+
+        # need to recreate prep_data
+        longdata <- data$data.long[id_sel,]
+        # data <- prep(data=data$data.long,person.id="person.id",task.id="task.id",occasion="occasion",group="group",max.counts="max.counts",obs.counts="obs.counts",time="time",cens="cens")
+        data <- prep(data=longdata,person.id="person.id",task.id="task.id",occasion="occasion",group="group",max.counts="max.counts",obs.counts="obs.counts",time="time",cens="cens")
+        
+      } else { # raw data set
+        id_col <- which(colnames(data)==person.id)
+        if (occasion == ""){ 
+          id_sel <- unlist(data[,id_col], use.names = FALSE) %in% cases$cases
+          data <- data[id_sel,]
+        }else {
+          occ_col <- which(colnames(data)==occasion)
+          id_new <- paste(unlist(data[,id_col]), unlist(data[,occ_col]), sep = "_")
+          id_sel <- id_new %in% cases$cases
+          data <- data[id_sel,]
+        }        
+      }
+    }
+    
+    if (person.id != "") {
+      if (testlet) { # should with sub.task.id
+        prep_data <- prep(data=data,person.id=person.id,task.id=task.id,sub.task.id=sub.task.id,occasion=occasion,group=group,max.counts=max.counts,obs.counts=obs.counts,time=time,cens=cens,sentence_level = TRUE)
+      } else {
+        prep_data <- prep(data=data,person.id=person.id,task.id=task.id,occasion=occasion,group=group,max.counts=max.counts,obs.counts=obs.counts,time=time,cens=cens)        
+      }
+      
+      if (cens == "") { # in case cens == ""
+        data$cens <- 0 # all are observed
+        cens <- "cens"
+      }
+    } else { # if already with prep_data
+      # flog.info("person.id, and the other column names are necessary.", name="orfrlog")
+      # return(NULL)
+      # set items from prepared data
+      tryCatch (
+        expr = {
+          prep_data <- data
+          data <- data$data.long
+          
+          person.id <- "person.id"
+          task.id <- "task.id"
+          
+          if (testlet) {
+            sub.task.id <- "sub.task.id"      
+            occasion <- "occasion"
+            group <- "group"
+            max.counts <- "max.counts"
+            obs.counts <- "obs.counts"
+            time <- "time"
+          } else {
+            occasion <- "occasion"
+            group <- "group"
+            max.counts <- "max.counts"
+            obs.counts <- "obs.counts"
+            time <- "time"            
+          }
+
+          
+          if ("cens" %in% c(colnames(data))) {
+            cens <- "cens"           
+          } else {
+            data$cens <- 0 # all are observed
+            cens <- "cens"
+          }
+
+        },
+        error = function(w) {
+          flog.info("Please make sure your prepared data is correct!", name = "orfrlog")
+          flog.info(w, name = "orfrlog")
+        }
+      )
+    }   
+    
+
+    if (testlet) { # sub task level
+      # save data
+      preped_data <- prep_data$data.long
+      
+      # need to keep the order of person.id as group_by and summarize will automatically order the id
+      original_order <- preped_data %>%
+        distinct(person.id) %>%
+        mutate(order = row_number())
+      
+      temp_summary <- preped_data %>%
+        group_by(person.id, task.id) %>%
+        summarise(max.counts.sum = sum(max.counts, na.rm = TRUE), 
+                  obs.counts.sum = sum(obs.counts, na.rm = TRUE), .groups = "drop") %>%
+        group_by(person.id) %>%
+        summarise(
+          task.n = n(), 
+          max.counts.total = sum(max.counts.sum),
+          obs.counts.total = sum(obs.counts.sum),
+          .groups = "drop"
+        )
+      
+      subtask_summary <- preped_data %>%
+        group_by(person.id) %>%
+        summarise(sub.task.n = n(), 
+                  secs.obs = sum(time, na.rm = TRUE), 
+                  occasion = n_distinct(occasion), 
+                  group = n_distinct(group), .groups = "drop")
+      
+      temp_summary <- temp_summary %>%
+        left_join(subtask_summary, by = "person.id") %>% mutate(wcpm.obs = obs.counts.total/secs.obs*60)
+
+      # restore the order of person.id 
+      temp_summary <- temp_summary %>%
+        left_join(original_order, by = "person.id") %>%
+        arrange(order) %>%
+        select(-order)
+      
+      vars <- c(person.id,
+                task.id,
+                sub.task.id,
+                cens)
+      data <- data %>% select(all_of(vars)) # select(person.id, task.id, sub.task.id,cens)
+      
+      col.labels <- c("person.id","task.id","sub.task.id","cens")
+
+      colnames(data) <- col.labels
+      
+      # get censoring info
+      Cens_data <- data.matrix(data %>% 
+                          select(person.id, task.id, sub.task.id,cens) %>% 
+                          mutate(id.seq = paste0(task.id,sub.task.id)) %>%
+                          select(person.id, id.seq, cens) %>% 
+                          pivot_wider(names_from = id.seq, values_from = cens) %>% 
+                          select(-person.id))
+      
+      #Filter the parameters in the calib data for sentences read
+      param_read <- data %>%
+        select(task.id, sub.task.id) %>%
+        distinct() %>%
+        mutate(sub.task.id=as.numeric(paste(task.id, sub.task.id, sep = ""))) %>%
+        left_join(calib.data$task.param)
+      
+      a_read <- param_read$a
+      b_read <- param_read$b
+      alpha_read <- param_read$alpha
+      beta_read <- param_read$beta
+      passage_read <- param_read$task.id
+      N_read <- prep_data$data.wide$N.vec %>% as.vector() %>% unlist()
+      
+      #Conditional for external scoring.
+      if((length(external) == 0)){ #if no external, wcpm will be estimated from the passages & sentences read! Using the same strategy as in bayes.wcpm function. 
+        a_score <- a_read
+        b_score <- b_read
+        alpha_score <- alpha_read 
+        beta_score <- beta_read
+        N_score <- N_read
+        passage_score <- passage_read
+      }else{
+        #pull the below from the "external" vector supplied!
+        #Will be edited later, after we see what is the rule for the task and sub.task ID scheme?
+        param_score <- calib.data$task.param %>%
+          mutate(Nwords=calib.data$N) %>%
+          filter(sub.task.id %in% external)
+          
+        a_score <- param_score$a
+        b_score <- param_score$b
+        alpha_score <- param_score$alpha
+        beta_score <- param_score$beta
+        N_score <- param_score$Nwords
+        passage_score <- param_score$task.id
+      }
+      
+     # scoring_output <- scoring.sentence.censoring(Count=calib.data$Y, logT10=calib.data$logT10, 
+     #                             N=calib.data$N,
+     #                             Passage=calib.data$task.param$task.id,
+     #                            a=calib.data$task.param$a, b=calib.data$task.param$b,
+     #                             alpha=calib.data$task.param$alpha, beta=calib.data$task.param$beta,
+     #                             gamma1=calib.data$hyper.param$gamma1, gamma2=calib.data$hyper.param$gamma2,
+     #                             sigma=calib.data$hyper.param$sigma, rho=calib.data$hyper.param$rho.theta,
+     #                            rhoTestlet=calib.data$hyper.param$rho.testlet,
+     #                             C=Cens_data)
+     
+       scoring_output <- scoring.sentence.censoring(Count=prep_data$data.wide$Y, 
+                                                    logT10=prep_data$data.wide$logT10, 
+                                                    N=N_read,
+                                                    N_score=N_score,
+                                                    Passage=passage_read,
+                                                    Passage_score=passage_score,
+                                                    a=a_read, 
+                                                    b=b_read,
+                                                    alpha=alpha_read, 
+                                                    beta=beta_read,
+                                                    a_score=a_score, 
+                                                    b_score=b_score,
+                                                    alpha_score=alpha_score, 
+                                                    beta_score=beta_score,
+                                                    gamma1=calib.data$hyper.param$gamma1, 
+                                                    gamma2=calib.data$hyper.param$gamma2,
+                                                    sigma=calib.data$hyper.param$sigma, 
+                                                    rho=calib.data$hyper.param$rho.theta,
+                                                    rhoTestlet=calib.data$hyper.param$rho.testlet,
+                                                    C=Cens_data, 
+                                                    type=type)
+      
+      
+      
+       out <- tibble(person.id=temp_summary$person.id, occasion=temp_summary$occasion, group=temp_summary$group,
+                     task.n=temp_summary$task.n,
+                     sub.task.n=temp_summary$sub.task.n, max.counts.total=temp_summary$max.counts.total,
+                     obs.counts.total=temp_summary$obs.counts.total, 
+                     secs.obs=temp_summary$secs.obs, wcpm.obs=temp_summary$wcpm.obs,
+                     tau.bayes=scoring_output$theta_spd_est,
+                     theta.bayes=scoring_output$theta_acc_est,
+                     se.tau.bayes=scoring_output$theta_spd_sd,
+                     se.theta.bayes=scoring_output$theta_acc_sd,
+                     count.bayes = scoring_output$count_est,
+                     se.count.bayes = scoring_output$count_sd,
+                     secs.bayes = scoring_output$time_est,
+                     se.secs.bayes = scoring_output$time_sd,
+                     wcpm.bayes = scoring_output$wcpm_est,
+                     se.wcpm.bayes = scoring_output$wcpm_sd)
+       
+       class(out) <- "scoring.censoring"
+       return(invisible(out))
+      
+    } else { # task level
+
+    original_order <- prep_data$data.long %>% #data
+        distinct(person.id) %>%
+        mutate(order = row_number())
+      
+      temp_summary <- prep_data$data.long %>%
+        group_by(person.id) %>%
+        summarise(
+          task.n = n_distinct(task.id), # Number of unique tasks
+          max.counts.total = sum(max.counts),
+          obs.counts.total = sum(obs.counts),
+          .groups = "drop"
+        )
+      
+      subtask_summary <- prep_data$data.long %>%
+        group_by(person.id) %>%
+        summarise(#sub.task.n = n(), 
+                  secs.obs = sum(time, na.rm = TRUE), 
+                  occasion = n_distinct(occasion), 
+                  group = n_distinct(group), .groups = "drop")
+      
+      temp_summary <- temp_summary %>%
+        left_join(subtask_summary, by = "person.id") %>% mutate(wcpm.obs = obs.counts.total/secs.obs*60)
+      
+      temp_summary <- temp_summary %>%
+        left_join(original_order, by = "person.id") %>%
+        arrange(order) %>%
+        select(-order)
+      
+      vars <- c(person.id,
+                task.id,
+                cens)
+      data <- data %>% select(all_of(vars)) 
+      
+      col.labels <- c("person.id","task.id","cens")
+      
+      colnames(data) <- col.labels
+      
+      Cens_data <- data.matrix(data %>% 
+                          select(person.id, task.id, cens) %>%
+                          pivot_wider(names_from = task.id, values_from = cens) %>% 
+                          select(-person.id))
+      
+      
+      #Filter the parameters in the calib data for passages read
+      param_read <- data %>%
+        select(task.id) %>%
+        distinct() %>%
+        mutate(task.id=as.numeric(task.id)) %>%
+        left_join(calib.data$task.param)
+      
+      a_read <- param_read$a
+      b_read <- param_read$b
+      alpha_read <- param_read$alpha
+      beta_read <- param_read$beta
+      passage_read <- param_read$task.id
+      N_read <- param_read$max.counts
+      
+      #Conditional for external scoring.
+      if((length(external) == 0)){ #if no external, wcpm will be estimated from the passages & sentences read! Using the same strategy as in bayes.wcpm function. 
+        a_score <- a_read
+        b_score <- b_read
+        alpha_score <- alpha_read 
+        beta_score <- beta_read
+        N_score <- N_read
+        passage_score <- passage_read
+      }else{
+        #pull the below from the "external" vector supplied!
+        param_score <- calib.data$task.param %>%
+          rename(Nwords=max.counts) %>%
+          filter(task.id %in% external)
+        
+        a_score <- param_score$a
+        b_score <- param_score$b
+        alpha_score <- param_score$alpha
+        beta_score <- param_score$beta
+        N_score <- param_score$Nwords
+        passage_score <- param_score$task.id
+      }
+      
+      scoring_output <- scoring.passage.censoring(Count=prep_data$data.wide$Y, 
+                                                  logT10=prep_data$data.wide$logT10, 
+                                                  N=N_read,
+                                                  N_score=N_score, 
+                                                  a=a_read,
+                                                  b=b_read, 
+                                                  alpha=alpha_read,  
+                                                  beta=beta_read,
+                                                  a_score=a_score, 
+                                                  b_score=b_score,
+                                                  alpha_score=alpha_score, 
+                                                  beta_score=beta_score,
+                                                  sigma=calib.data$hyper.param$vartau, 
+                                                  rho=calib.data$hyper.param$rho,
+                                                  C=Cens_data, 
+                                                  type=type)
+
+      out <- tibble(person.id=temp_summary$person.id, occasion=temp_summary$occasion, group=temp_summary$group,
+                    task.n=temp_summary$task.n,
+                    max.counts.total=temp_summary$max.counts.total,
+                    obs.counts.total=temp_summary$obs.counts.total, 
+                    secs.obs=temp_summary$secs.obs, wcpm.obs=temp_summary$wcpm.obs,
+                    tau.bayes=scoring_output$theta_spd_est,
+                    theta.bayes=scoring_output$theta_acc_est,
+                    se.tau.bayes=scoring_output$theta_spd_sd,
+                    se.theta.bayes=scoring_output$theta_acc_sd,
+                    count.bayes = scoring_output$count_est,
+                    se.count.bayes = scoring_output$count_sd,
+                    secs.bayes = scoring_output$time_est,
+                    se.secs.bayes = scoring_output$time_sd,
+                    wcpm.bayes = scoring_output$wcpm_est,
+                    se.wcpm.bayes = scoring_output$wcpm_sd)
+      
+      class(out) <- "scoring.censoring"
+      return(invisible(out))
+    }
+  } else { # without censoring ---------------------------------------------------------------------------------------------
+    if (se == "analytic") {
+      if (est != "bayes") { #not bayes
+        if (person.id != "") {
+          data <- preplong(data,person.id,task.id,occasion,group,max.counts,obs.counts,time)
+        }
+        # Check MCEM object
+        if (class(calib.data)[1] == "fit.model") {
+          #      MCEM <- calib.data
+          # assign task.data
+          task.data <- calib.data$task.param
+        } else { # if no MCEM object stop running
+          flog.info("Missed fit.model object, end scoring process", name = "orfrlog")
+          return(NULL)
+        }
+        
+        if (length(external) != 0) { # external,
+          flog.info(paste("Use external task:", paste(external, collapse = ",")))
+        }
+        
+        # Check cases
+        if (length(cases) == 0) {
+          # print("Cases: ")
+          cases <- get.cases(data)
+        } else { # check if cases is with "_"
+          colnames(cases) <- c("cases")
+          if (!grepl("_", cases[1,1], fixed = TRUE)) { # if task.id only
+            cases <- cases %>% mutate(across(cases, ~ paste0(.,'_1')))
+          } 
+        }
+        
+        # Check if there is a perfect accurate case
+        perfect.cases <- get.perfectcases(data)
+        
+        if (count(perfect.cases) != 0) {
+          flog.info(paste("The perfect accurate case: ", paste(perfect.cases$perfect.cases, collapse = ", ")), name="orfrlog")
+        } else {
+          flog.info("There is no perfect accurate case.", name="orfrlog")
+        }
+        
+        # Check if there is a zero accurate case
+        zero.cases <- get.zerocases(data)
+        
+        if (count(zero.cases) != 0) {
+          flog.info(paste("The zero accurate case: ", paste(zero.cases$zero.cases, collapse = ", ")), name="orfrlog")
+        } else {
+          flog.info("There is no zero accurate case.", name="orfrlog")
+        }            
+        
+        result.list <- run.scoring(calib.data, data, task.data, cases, perfect.cases, zero.cases, est, lo = -12, hi = 12, q = 100, kappa = 1, external=external,type=type)
+        class(result.list) <- "scoring"
+        return(result.list)
+        
+      } else  { # bayes
+        if (person.id == "") { # if without columns' names
+          result.list <- bayes.wcpm(
+            calib.data = calib.data,
+            person.data = data,
+            cases = cases,
+            external=external,
+            type=type,
+            parallel=TRUE, #logical, run in parallel? "TRUE" or "FALSE"
+            n.chains=NA, # pos. int., number of the chains
+            iter=NA,  # pos. int., number of the iterations after the burn-in period
+            burn=NA,  # pos. int., number of the burn-in iterations
+            thin=1 #pos. int, thinning interval, a.k.a, period of saving samples
+          )
+        } else {
+          result.list <- bayes.wcpm(
+            calib.data = calib.data,
+            person.data = data,
+            person.id = person.id,
+            task.id = task.id,
+            occasion = occasion,
+            group = group,
+            max.counts = max.counts,
+            obs.counts = obs.counts,
+            time = time,
+            cases = cases,
+            external=external,
+            type=type,
+            parallel=TRUE, #logical, run in parallel? "TRUE" or "FALSE"
+            n.chains=NA, # pos. int., number of the chains
+            iter=NA,  # pos. int., number of the iterations after the burn-in period
+            burn=NA,  # pos. int., number of the burn-in iterations
+            thin=1 #pos. int, thinning interval, a.k.a, period of saving samples
+          )
+        }
+        class(result.list) <- "scoring"
+        return(result.list)
+      }
+    } else if (se == "bootstrap"){ #for bootstrap
+      # Check if there is a perfect accurate case
+      perfect.cases <- get.perfectcases(data)
+
+      # Check if there is a zero accurate case
+      zero.cases <- get.zerocases(data)
+      
+      if (count(zero.cases) != 0) {
+        flog.info(paste("The zero accurate case: ", paste(zero.cases$zero.cases, collapse = ", ")), name="orfrlog")
+      } else {
+        flog.info("There is no zero accurate case.", name="orfrlog")
+      }    
+      
+      RE_TRY <- failsafe # Define retry, if 0, no retry
+      j <- 0 # index for retry time
+      i <- 1 # index for case loop
+      
+      t_size <- nrow(cases)
+      
+      while (i <= t_size) {
+        temp <- tibble()
+        flog.info(paste("Boostrap running for case:", cases$cases[i]), name = "orfrlog")
+        t_case = data.frame(cases=cases$cases[i])
+        tryCatchLog(
+          # temp <- getBootstrapSE(calib.data, data, case=t_case, perfect.cases, est, kappa=1,bootstrap=bootstrap),
+          temp <- getBootstrapSE(calib.data, data, case=t_case, perfect.cases, zero.cases, est, kappa=1,bootstrap=bootstrap),
+
+          error=function(e) {
+            flog.info(paste("Running error:", e), name = "orfrlog")
+          }
+        )
+        
+        if (length(temp) > 2) { #without error
+          bootstrap.out <- rbind(bootstrap.out,temp)
+          j <- 0 # reset index of retry
+          i <- i + 1 # go to next case
+        } else { # with error
+          if (j == RE_TRY) { # after RE_TRY if still error
+            error_temp <- tibble(case_id = cases$cases[i])
+            error_case <- rbind(error_case, error_temp)
+            i <- i + 1 # go to next case
+          } else {
+            # let it retry a couple of times
+            j <- j + 1
+            flog.info(paste("Boostrap try again: time", j), name = "orfrlog")
+          }
+        }
+      }
+      result.list <- list(bootstrap.out = bootstrap.out,
+                          error_case = error_case)
+      class(result.list) <- "bootstrap"
+      return(result.list)
+    }
+  }
+}
